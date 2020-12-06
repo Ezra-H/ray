@@ -2,7 +2,7 @@
 try:
     import mpi4py
 except ImportError:
-    raise ImportError("mpi4py fail to import, please run con")
+    raise ImportError("mpi4py fail to import, please run 'conda install mpi4py' to in stall it")
 
 import logging
 import datetime
@@ -12,9 +12,10 @@ import ray
 import numpy as np
 import mpi4py.MPI as MPI
 
-from ray.util.collective import mpi_util
+from ray.util.collective.collective_group import mpi_util
 from ray.util.collective.collective_group.base_collective_group import BaseGroup
 from ray.util.collective.types import AllReduceOptions, BarrierOptions
+from ray.util.collective.const import NAMED_ACTOR_STORE_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +66,14 @@ class MPIGroup(BaseGroup):
     def __init__(self, world_size, rank, group_name):
         """Init an MPI collective group."""
         super(MPIGroup, self).__init__(world_size, rank, group_name)
+        print('rank {} group_name {}'.format(rank, group_name))
 
         # default communicator
         self._mpi_comm = MPI.COMM_WORLD
 
         _rank = self._mpi_comm.rank
-        assert _rank == rank
+        print(_rank, rank)
+        # assert _rank == rank
 
         self._rendezvous = Rendezvous(self.group_name)
         self._rendezvous.meet_at_store()
@@ -78,8 +81,12 @@ class MPIGroup(BaseGroup):
         # Setup the mpi uid using the store
         self._init_mpi_unique_id()
 
-        # Setup a tensor for barrier calls
-        self._barrier_tensor = np.array([1])
+        # # Setup a tensor for barrier calls
+        # self._barrier_tensor = np.array([1])
+
+    def _init_mpi_unique_id(self):
+        """Init the MPI unique ID required for setting up MPI communicator."""
+        self._mpi_uid = self._rendezvous.get_mpi_id()
 
     @classmethod
     def backend(cls):
@@ -93,22 +100,26 @@ class MPIGroup(BaseGroup):
     def size(self):
         return self._mpi_comm.size
 
-    # @property
-    # def intra_rank(self):
-    #     return self._intra_rank
-
-    # @property
-    # def intra_size(self):
-    #     return self._intra_size
-
     def destroy_group(self):
         """Destroy the group and release the MPI communicators safely."""
         MPI.Finalize()
 
     def allreduce(self, tensor, allreduce_options=AllReduceOptions()):
-        self._mpi_comm.Allreduce(tensor, op=mpi_util.get_mpi_reduce_op(allreduce_options.reduceOp))
+        """
+        AllReduce a list of tensors following options.
 
-        print(tensor)
+        Args:
+            tensor: the tensor to be reduced, each tensor locates on a GPU
+            allreduce_options:
+
+        Returns:
+        """
+        mpi_util._check_dtype("allreduce", tensor)
+
+        dtype = mpi_util.get_mpi_tensor_dtype(tensor)
+        op = mpi_util.get_mpi_reduce_op(allreduce_options.reduceOp)
+
+        self._mpi_comm.Allreduce(MPI.IN_PLACE, [tensor, dtype], op=op)
 
     def barrier(self, barrier_options=BarrierOptions()):
         self._mpi_comm.Barrier()

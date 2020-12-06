@@ -10,8 +10,8 @@ class Actor:
         self.send = cp.ones((10,), dtype=cp.float32)
         self.recv = cp.zeros((10,), dtype=cp.float32)
         cp.cuda.Stream.null.synchronize()
-   
-   def send_getter(self):
+
+    def send_getter(self):
         return self.send
 
     def send_setter(self, val):
@@ -67,9 +67,9 @@ def allreduce(group_name):
 
 _group_mgr = GroupManager()
 
-group_options = {"name" : "haha", 
+group_options = {"name" : "haha",
                  "backend" : "nccl",
-                 "world_size" : 4, 
+                 "world_size" : 4,
                  "rank" : [0,1,2,3]}
 
 actors = [Actor().remote() for i in range(4)]

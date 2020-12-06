@@ -1,7 +1,6 @@
 """Code to wrap some MPI API calls."""
 import mpi4py
 import numpy
-import numpy as np
 
 
 from ray.util.collective.types import ReduceOp, torch_available
@@ -15,6 +14,7 @@ MPI_REDUCE_OP_MAP = {
 
 NUMPY_MPI_DTYPE_MAP = {
     # see the definition of mpi4py.MPI._typedict (in mpi4py/MPI/typemap.pxi)
+    numpy.dtype(numpy.bool): mpi4py.MPI._typedict['?'],
     numpy.dtype(numpy.int32): mpi4py.MPI._typedict['i'],
     numpy.dtype(numpy.int64): mpi4py.MPI._typedict['l'],
     numpy.dtype(numpy.float16): mpi4py.MPI._typedict['f'],
@@ -25,7 +25,7 @@ NUMPY_MPI_DTYPE_MAP = {
 if torch_available():
     import torch
     TORCH_MPI_DTYPE_MAP = {
-        torch.bool: mpi4py.MPI._typedict['b'],
+        torch.bool: mpi4py.MPI._typedict['?'],
         torch.long: mpi4py.MPI._typedict['l'],
         torch.float16: mpi4py.MPI._typedict['f'],
         torch.float32: mpi4py.MPI._typedict['f'],
@@ -33,8 +33,9 @@ if torch_available():
     }
 
 
-def _check_dtype(caller, msgtype):
-    dtype = msgtype.dtype
+def _check_dtype(caller, msg):
+    dtype = msg.dtype
+    print(dtype)
     if dtype not in NUMPY_MPI_DTYPE_MAP.keys():
         raise TypeError(
             '{} does not support dtype {}'.format(caller, dtype))
@@ -52,10 +53,18 @@ def get_mpi_reduce_op(reduce_op):
 
 def get_mpi_tensor_dtype(tensor):
     """Return the corresponded MPI dtype given a tensor."""
-    if isinstance(tensor, np.ndarray):
-        return NUMPY_MPI_DTYPE_MAP[tensor.dtype.type]
+    if isinstance(tensor, numpy.ndarray):
+        return NUMPY_MPI_DTYPE_MAP[tensor.dtype]
     if torch_available():
         if isinstance(tensor, torch.Tensor):
             return TORCH_MPI_DTYPE_MAP[tensor.dtype]
     raise ValueError('Unsupported tensor type')
 
+def get_mpi_tensor_obj(tensor):
+    """Return tensor object."""
+    if isinstance(tensor, torch.Tensor):
+        return tensor.numpy()
+    if isinstance(tensor, numpy.ndarray):
+        return tensor
+
+    raise ValueError('Unsupported tensor type')

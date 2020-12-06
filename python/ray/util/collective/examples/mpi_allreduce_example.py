@@ -32,10 +32,11 @@ if __name__ == "__main__":
     workers = []
     init_rets = []
     for i in range(num_workers):
+        print(i)
         w = Worker.remote()
         workers.append(w)
-        init_rets.append(w.setup.remote(num_workers, i))
-    # m = ray.get(init_rets)
+        m = ray.get(w.setup.remote(num_workers, i))
+        init_rets.append(m)
     results = ray.get([w.compute.remote() for w in workers])
     # print(results)
     ray.shutdown()

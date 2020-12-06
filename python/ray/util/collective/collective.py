@@ -2,6 +2,7 @@
 import logging
 
 import ray
+import uuid
 from ray.util.collective import types
 from ray.util.collective.const import NAMED_ACTOR_STORE_SUFFIX
 
@@ -13,6 +14,8 @@ try:
     from ray.util.collective.collective_group.mpi_collective_group import MPIGroup
 except ImportError:
     _MPI_AVAILABLE = False
+# appear ModuleNotFoundError, cupy not install
+
 
 try:
     from ray.util.collective.collective_group.nccl_collective_group import NCCLGroup
@@ -33,10 +36,27 @@ def _backend_check(backend):
     if backend == 'mpi':
         if not mpi_available():
             raise RuntimeError()
-        raise NotImplementedError()
+        # raise NotImplementedError()
     elif backend == 'nccl':
         if not nccl_available():
             raise RuntimeError()
+
+
+@ray.remote
+class MPIUniqueIDStore(object):
+    """MPIUniqueID. This class should be used as a named actor."""
+    def __init__(self, name):
+        self.name = name
+        self.mpi_id = None
+
+    def set_id(self, uid):
+        self.mpi_id = uid
+        return self.mpi_id
+
+    def get_id(self):
+        if not self.mpi_id:
+            logging.warning('The MPI ID has not been set yet for store {}'.format(self.name))
+        return self.mpi_id
 
 
 @ray.remote
@@ -77,7 +97,15 @@ class GroupManager(object):
         Put the registration and the group information into the manager metadata as well.
         """
         if backend == 'mpi':
-            raise NotImplementedError()
+            if rank == 0:
+                group_uid = uuid.uuid1()
+                store_name = group_name + NAMED_ACTOR_STORE_SUFFIX
+                store = MPIUniqueIDStore.options(name=store_name, lifetime="detached").remote(store_name)
+                ray.wait([store.set_id.remote(group_uid)])
+            logging.debug('creating MPI group: {}'.format(group_name))
+            g = MPIGroup(world_size, rank, group_name)
+            self._name_group_map[group_name] = g
+            self._group_name_map[g] = group_name
         elif backend == 'nccl':
             # create the ncclUniqueID
             if rank == 0:
@@ -92,6 +120,9 @@ class GroupManager(object):
             g = NCCLGroup(world_size, rank, group_name)
             self._name_group_map[group_name] = g
             self._group_name_map[g] = group_name
+        if rank==0:
+            print("backend: {}, group_uid: {}".format(backend, group_uid))
+
         return self._name_group_map[group_name]
 
     def is_group_exist(self, group_name):
@@ -122,6 +153,13 @@ class GroupManager(object):
         del self._name_group_map[group_name]
 
         if backend == 'nccl':
+            # release the named actor
+            if rank == 0:
+                store_name = group_name + NAMED_ACTOR_STORE_SUFFIX
+                store = ray.get_actor(store_name)
+                ray.wait([store.__ray_terminate__.remote()])
+                ray.kill(store)
+        if backend == 'mpi':
             # release the named actor
             if rank == 0:
                 store_name = group_name + NAMED_ACTOR_STORE_SUFFIX
@@ -258,7 +296,7 @@ def declare_collective_group(actors, group_options):
         backend = group_options["backend"]
     except:
         raise ValueError("group options incomplete")
-    
+
     _backend_check(backend)
     if _group_mgr_2.is_group_exist(group_name):
         raise RuntimeError('Trying to initialize a group twice.')
